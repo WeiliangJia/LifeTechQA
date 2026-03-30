@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:lifetech.star-x-tech.com)",
+      "Read(//c/Users/a/.claude/plugins//**)",
+      "Read(//c/Users/a/.claude/**)",
+      "Bash(npx playwright:*)",
+      "Read(//tmp/**)",
+      "Bash(tee /tmp/entity-run.txt)",
+      "Read(//c/Users/a/Desktop/Star X/**)",
+      "Bash(npm run:*)"
+    ]
+  }
+}

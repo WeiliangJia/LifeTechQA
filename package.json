@@ -1,0 +1,21 @@
+{
+  "name": "lifetech-payment-tests",
+  "version": "1.0.0",
+  "description": "Automated payment flow tests for lifetech.star-x-tech.com",
+  "scripts": {
+    "test": "playwright test --ignore=tests/*explore*",
+    "test:headed": "playwright test --headed --ignore=tests/*explore*",
+    "test:report": "playwright show-report",
+    "test:login": "playwright test tests/01-login.spec.ts --headed",
+    "test:payment": "playwright test tests/02-payment-form.spec.ts --headed",
+    "test:registration": "playwright test tests/12-registration-flow.spec.ts --headed",
+    "test:entity": "playwright test tests/14-entity-flow.spec.ts --headed",
+    "test:health": "playwright test tests/00-selector-health.spec.ts",
+    "explore:payment": "playwright test tests/05-explore-page.spec.ts --headed",
+    "explore:entity": "playwright test tests/13-entity-explore.spec.ts --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.43.0",
+    "@types/node": "^20.0.0"
+  }
+}

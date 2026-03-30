@@ -1,0 +1,9 @@
+services:
+  playwright:
+    build: .
+    volumes:
+      # 截图和报告输出到本地（可改成 D 盘路径）
+      - ./screenshots:/tests/screenshots
+      - ./playwright-report:/tests/playwright-report
+    environment:
+      - CI=true
