@@ -1,8 +1,8 @@
 // ─── Test Data ───────────────────────────────────────────────────────────────
 
 export const CREDENTIALS = {
-  valid: { email: 'andy.jia@clcn.com.au', password: '66666666' },
-  invalidPassword: { email: 'andy.jia@clcn.com.au', password: 'wrongpass' },
+  valid: { email: '1144890814@qq.com', password: '66666666' },
+  invalidPassword: { email: '1144890814@qq.com', password: 'wrongpass' },
   invalidEmail: { email: 'notexist@example.com', password: '66666666' },
 };
 

@@ -13,7 +13,8 @@
     "test:settings": "playwright test tests/15-settings-profile.spec.ts --headed",
     "test:health": "playwright test tests/00-selector-health.spec.ts",
     "explore:payment": "playwright test tests/05-explore-page.spec.ts --headed",
-    "explore:entity": "playwright test tests/13-entity-explore.spec.ts --headed"
+    "explore:entity": "playwright test tests/13-entity-explore.spec.ts --headed",
+    "probe:scheduled": "playwright test tests/16-scheduled-payment-probe.spec.ts --headed"
   },
   "devDependencies": {
     "@playwright/test": "^1.43.0",
