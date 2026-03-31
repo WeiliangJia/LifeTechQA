@@ -13,7 +13,7 @@
  *   → card 0341 (fail) → card 4242 (success)
  */
 import { test, expect } from '@playwright/test';
-import { login, fillCard, handle3DS, dumpSnapshot } from './helpers';
+import { login, fillCard, dumpSnapshot } from './helpers';
 import { CARDS } from './fixtures';
 
 test.setTimeout(240000);
@@ -278,41 +278,59 @@ test.describe('Entity Flow', () => {
     await fillCard(page, CARDS.three_d_secure_fail);
     await page.screenshot({ path: 'screenshots/14-p1-filled.png' });
 
-    // Click the confirmed pay button ("Pay $50"), register response listener first
-    const payResponsePromise = page.waitForResponse(
-      res => res.url().includes('/api/payments') || res.url().includes('stripe.com/v1'),
+    // Register listener for the backend subscribe response BEFORE clicking pay
+    const backendResponsePromise = page.waitForResponse(
+      res => res.url().includes('/api/payments/entity') && res.url().includes('/subscribe'),
       { timeout: 30000 }
     ).catch(() => null);
+
     await payBtn.click();
     console.log('[Payment] Pay button clicked');
-    await payResponsePromise;
 
-    // 3DS modal is optional here — the app may decline the card server-side
-    // without opening a browser 3DS challenge. Wrap to survive page navigation.
-    await handle3DS(page, 'fail').catch(() => {
-      console.log('[3DS] Skipped — page navigated during 3DS wait (normal for server-side decline)');
-    });
-    await page.waitForTimeout(5000).catch(() => {});
-    await page.screenshot({ path: 'screenshots/14-p1-result.png', fullPage: true }).catch(() => {});
+    // Wait for the backend to respond (this is what carries the card_declined error)
+    const payResponse = await backendResponsePromise;
+    if (payResponse) {
+      const body = await payResponse.json().catch(() => null);
+      console.log(`[Attempt 1 API] ${payResponse.status()} ${payResponse.url()}`);
+      if (body) console.log('[Attempt 1 API body]', JSON.stringify(body).slice(0, 500));
+    }
+
+    // Give UI time to render the error notification
+    await page.waitForTimeout(2000);
+    await dumpSnapshot(page, 'After 0341 decline — error notification');
+    await page.screenshot({ path: 'screenshots/14-p1-result.png', fullPage: true });
 
     const has0341Error = await page.locator('text=/declined|failed|authentication|invalid/i').count() > 0;
     console.log('[Attempt 1] Decline error shown:', has0341Error);
 
-    // Dismiss error dialog before next attempt
-    const tryAgainBtn = page.locator(S.dialogDismissBtn);
-    if (await tryAgainBtn.count() > 0) {
-      await tryAgainBtn.click();
-      console.log('[Attempt 1] Error dialog dismissed');
-      await page.waitForTimeout(1000);
+    // Close the payment dialog entirely before retry
+    // Try X button first, then Cancel button
+    const closeDialogBtn = page.locator(S.closeDialogBtn);
+    const cancelPayBtn   = page.locator(S.cancelPayBtn);
+    if (await closeDialogBtn.count() > 0) {
+      await closeDialogBtn.click();
+      console.log('[Attempt 1] Dialog closed via X button');
+    } else if (await cancelPayBtn.count() > 0) {
+      await cancelPayBtn.click();
+      console.log('[Attempt 1] Dialog closed via Cancel button');
+    } else {
+      console.warn('[Attempt 1] No close button found — check dumpSnapshot above');
     }
+    await page.waitForTimeout(1000);
 
     // ── PAYMENT ATTEMPT 2: card 4242 (expect success) ──────────────────────
+    // Re-click the same plan's Select button to open a fresh payment dialog
     console.log('\n── Attempt 2: card 4242 4242 4242 4242 (expect success) ──');
-    await page.waitForTimeout(1500);
+    const selectBtnRetry = page.locator(S.selectPlanBtn).first();
+    await expect(selectBtnRetry).toBeVisible({ timeout: 10000 });
+    await selectBtnRetry.click();
+    await page.waitForTimeout(3000);
 
-    // Re-open "Use a different card" if the dialog reset to saved-card view
+    await payBtn.waitFor({ state: 'visible', timeout: 15000 });
+    await page.waitForTimeout(1000);
+    console.log('[Attempt 2] Payment dialog reopened ✓');
+
     await selectNewCard();
-
     await fillCard(page, {
       number: '4242 4242 4242 4242',
       expiry: '09/29',
@@ -331,6 +349,7 @@ test.describe('Entity Flow', () => {
 
     await page.waitForTimeout(6000);
     await page.screenshot({ path: 'screenshots/14-p2-result.png', fullPage: true });
+    await dumpSnapshot(page, 'After 4242 payment — success page');
 
     const success = await page.locator('text=/success|paid|complete|thank|完成|成功/i').count() > 0;
     console.log('\n[Final Result] Payment success:', success);
