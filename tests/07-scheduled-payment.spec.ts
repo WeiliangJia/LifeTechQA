@@ -66,8 +66,8 @@ test.describe('Strategy A — Stripe Test Clock (requires sk_test_xxx)', () => {
 
     // ── Step 1: get the Stripe customer ID for this user ─────────────────
     // Your app's API may expose it — adjust the endpoint
-    const { token } = await getToken();
-    const userRes   = await appGet('/api/user/user/96', token);
+    const { token, userId } = await getToken();
+    const userRes   = await appGet(`/api/user/user/${userId}`, token);
     console.log('[User data]', JSON.stringify(userRes.body).slice(0, 300));
 
     // ── Step 2: create a test clock at current time ───────────────────────
@@ -144,7 +144,7 @@ test.describe('Strategy B — Backend trigger endpoint', () => {
     const triggerRes = await fetch(`${BASE}/api/payments/trigger-monthly`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body:    JSON.stringify({ userId: 96 }),
+      body:    JSON.stringify({ userId }),
     });
 
     if (triggerRes.status === 404) {

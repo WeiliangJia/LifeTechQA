@@ -404,7 +404,7 @@ test.describe('Registration — Validation', () => {
     await page.locator(S.emailMethodBtn).click();
     await page.waitForTimeout(500);
 
-    await page.locator(S.emailInput).first().fill('andy.jia@clcn.com.au'); // already registered
+    await page.locator(S.emailInput).first().fill('1144890814@qq.com'); // already registered
     await page.locator(S.continueBtn).click();
     await page.waitForTimeout(3000);
 

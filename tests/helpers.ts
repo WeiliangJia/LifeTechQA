@@ -139,7 +139,7 @@ export async function fillCard(
   const numberFrame = page.frameLocator(SEL.iframeCardNumber);
   const numberInput = numberFrame.locator(SEL.inputCardNumber);
   await numberInput.waitFor({ timeout: 15000 });
-  await numberInput.click();
+  await numberInput.click({ clickCount: 3 }); // triple-click to select any existing value
   await numberInput.pressSequentially(card.number.replace(/\s/g, ''), { delay: 30 });
   console.log('[Card] ✓ card number');
 
@@ -147,7 +147,7 @@ export async function fillCard(
   const expiryFrame = page.frameLocator(SEL.iframeExpiry);
   const expiryInput = expiryFrame.locator(SEL.inputExpiry);
   await expiryInput.waitFor({ timeout: 10000 });
-  await expiryInput.click();
+  await expiryInput.click({ clickCount: 3 });
   await expiryInput.pressSequentially(card.expiry.replace('/', ''), { delay: 30 });
   console.log('[Card] ✓ expiry');
 
@@ -155,7 +155,7 @@ export async function fillCard(
   const cvcFrame = page.frameLocator(SEL.iframeCvc);
   const cvcInput = cvcFrame.locator(SEL.inputCvc);
   await cvcInput.waitFor({ timeout: 10000 });
-  await cvcInput.click();
+  await cvcInput.click({ clickCount: 3 });
   await cvcInput.pressSequentially(card.cvc, { delay: 30 });
   console.log('[Card] ✓ CVC');
 

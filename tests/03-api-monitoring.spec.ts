@@ -28,7 +28,7 @@ test.describe('Auth API', () => {
       { timeout: 15000 }
     );
 
-    await page.locator('input[placeholder="Mobile Number/Email"]').fill('andy.jia@clcn.com.au');
+    await page.locator('input[placeholder="Mobile Number/Email"]').fill('1144890814@qq.com');
     await page.locator('input[type="password"]').fill('66666666');
     await page.locator('button:has-text("Continue")').click();
 

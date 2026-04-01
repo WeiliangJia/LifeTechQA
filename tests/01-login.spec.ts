@@ -64,7 +64,7 @@ test.describe('Authentication', () => {
     await page.goto('/');
     await page.waitForSelector('input[placeholder="Mobile Number/Email"]', { timeout: 15000 });
 
-    await page.locator('input[placeholder="Mobile Number/Email"]').fill('andy.jia@clcn.com.au');
+    await page.locator('input[placeholder="Mobile Number/Email"]').fill('1144890814@qq.com');
     // password left empty
 
     const btn = page.locator('button:has-text("Continue")');
