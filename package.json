@@ -9,6 +9,7 @@
     "test:login": "playwright test tests/01-login.spec.ts --headed",
     "test:payment": "playwright test tests/02-payment-form.spec.ts --headed",
     "test:registration": "playwright test tests/12-registration-flow.spec.ts --headed",
+    "test:add-event": "playwright test tests/16-add-event.spec.ts --headed",
     "test:entity": "playwright test tests/14-entity-flow.spec.ts --headed",
     "test:settings": "playwright test tests/15-settings-profile.spec.ts --headed",
     "test:wealth-market": "playwright test tests/17-wealth-market-listing.spec.ts --headed",
