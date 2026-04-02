@@ -13,6 +13,7 @@
     "test:add-event": "playwright test tests/16-add-event.spec.ts --headed",
     "test:entity": "playwright test tests/14-entity-flow.spec.ts --headed",
     "test:settings": "playwright test tests/15-settings-profile.spec.ts --headed",
+    "test:wealth-market": "playwright test tests/17-wealth-market-listing.spec.ts --headed",
     "test:health": "playwright test tests/00-selector-health.spec.ts",
     "explore:payment": "playwright test tests/05-explore-page.spec.ts --headed",
     "explore:entity": "playwright test tests/13-entity-explore.spec.ts --headed",
