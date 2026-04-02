@@ -5,9 +5,10 @@
  *   npx playwright test tests/11-registration-explore.spec.ts --headed
  */
 import { test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 
 // Extended snapshot: captures inputs, buttons, AND clickable divs/spans/li
-async function dumpFull(page: Parameters<typeof import('@playwright/test').test>[1] extends (args: infer A) => any ? A extends { page: infer P } ? P : never : never, label: string) {
+async function dumpFull(page: Page, label: string) {
   console.log(`\n${'═'.repeat(64)}`);
   console.log(`[${label}]  ${page.url()}`);
   console.log('═'.repeat(64));
@@ -101,6 +102,23 @@ test('EXPLORE: register page — wait for SPA render', async ({ page }) => {
 });
 
 test('EXPLORE: click through each step manually', async ({ page }) => {
+  // ── Mock OTP before any navigation ────────────────────────────────────────
+  // All registration explore tests use a generated email + mocked OTP.
+  // Never use a real email or wait for a real verification code.
+  const TEST_EMAIL = `autotest+${Date.now()}@mailtest.com`;
+  for (const pattern of [
+    '**/api/auth/registeruserbyemail*',
+    '**/api/auth/verify**',
+    '**/api/*/otp**',
+  ]) {
+    await page.route(pattern, route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, message: 'Verified' }),
+    }));
+  }
+  console.log(`[Mock] OTP endpoints mocked — using email: ${TEST_EMAIL}`);
+
   await page.goto('/');
   await page.waitForSelector('input', { timeout: 15000 });
   await page.waitForTimeout(500);
@@ -163,10 +181,10 @@ test('EXPLORE: click through each step manually', async ({ page }) => {
   await dumpFull(page, 'Step: After Email click');
   await page.screenshot({ path: 'screenshots/11-s3-email-method.png', fullPage: true });
 
-  // Step 4: enter email
+  // Step 4: enter email — always use generated mock email
   const emailInput = page.locator('input[type="email"], input[placeholder*="email" i]').first();
   if (await emailInput.count() > 0) {
-    await emailInput.fill('1144890814@qq.com');
+    await emailInput.fill(TEST_EMAIL);
     console.log('[Email input] Filled');
     await page.screenshot({ path: 'screenshots/11-s4-email-entered.png' });
 
