@@ -186,7 +186,6 @@ test('EXPLORE: click through each step manually', async ({ page }) => {
   if (await emailInput.count() > 0) {
     await emailInput.fill(TEST_EMAIL);
     console.log('[Email input] Filled');
-    await page.screenshot({ path: 'screenshots/11-s4-email-entered.png' });
 
     // Click next/send
     await page.locator('button:has-text("Next"), button:has-text("Send"), button:has-text("Continue")').first().click();
@@ -194,6 +193,193 @@ test('EXPLORE: click through each step manually', async ({ page }) => {
 
     console.log('\n=== STEP: After email submit ===');
     await dumpFull(page, 'Step: After email submit');
-    await page.screenshot({ path: 'screenshots/11-s5-after-email.png', fullPage: true });
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('EXPLORE: Professional User registration path', async ({ page }) => {
+  // ── Mock OTP before any navigation ────────────────────────────────────────
+  const TEST_EMAIL = `autotest+${Date.now()}@mailtest.com`;
+  for (const pattern of [
+    '**/api/auth/registeruserbyemail*',
+    '**/api/auth/verify**',
+    '**/api/*/otp**',
+  ]) {
+    await page.route(pattern, route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, message: 'Verified' }),
+    }));
+  }
+  console.log(`[Mock] OTP endpoints mocked — using email: ${TEST_EMAIL}`);
+
+  await page.goto('/');
+  await page.waitForSelector('input', { timeout: 15000 });
+  await page.waitForTimeout(500);
+
+  // ── Step 1: navigate to /register ─────────────────────────────────────────
+  await page.locator('a:has-text("Create a new account now!")').click();
+  await page.waitForURL('**/register**', { timeout: 10000 });
+  await page.waitForTimeout(3000);
+
+  console.log('\n=== STEP 1: /register loaded ===');
+  await dumpFull(page, 'Step 1: /register');
+
+  // ── Step 2: click "Professional User" card ─────────────────────────────────
+  const proSelectors = [
+    'text="Professional User"',
+    'text="Professional"',
+    '[class*="professional"]',
+    'div:has-text("Professional User")',
+    'li:has-text("Professional")',
+    '[class*="pro"]:has-text("Professional")',
+    'button:has-text("Professional")',
+  ];
+  let clicked = false;
+  for (const sel of proSelectors) {
+    const el = page.locator(sel).first();
+    if (await el.count() > 0) {
+      console.log(`[Professional User] Clicking with selector: ${sel}`);
+      await el.click();
+      clicked = true;
+      break;
+    }
+  }
+  if (!clicked) console.log('[Professional User] NOT FOUND — check snapshot above');
+
+  await page.waitForTimeout(2000);
+  console.log('\n=== STEP 2: After Professional User click ===');
+  await dumpFull(page, 'Step 2: After Professional User click');
+
+  // ── Step 3: select Email Address method ───────────────────────────────────
+  const emailMethodSelectors = [
+    'text="Email Address"',
+    'text="Email"',
+    '[class*="email"]',
+    'div:has-text("Email Address")',
+    'button:has-text("Email")',
+  ];
+  let emailMethodClicked = false;
+  for (const sel of emailMethodSelectors) {
+    const el = page.locator(sel).first();
+    if (await el.count() > 0) {
+      console.log(`[Email method] Clicking with selector: ${sel}`);
+      await el.click();
+      emailMethodClicked = true;
+      break;
+    }
+  }
+  if (!emailMethodClicked) console.log('[Email method] NOT FOUND');
+
+  await page.waitForTimeout(2000);
+  console.log('\n=== STEP 3: After Email method click ===');
+  await dumpFull(page, 'Step 3: After Email method click');
+
+  // ── Step 4: fill email and submit ─────────────────────────────────────────
+  const emailInput = page.locator('input[type="email"], input[placeholder*="email" i]').first();
+  if (await emailInput.count() > 0) {
+    await emailInput.fill(TEST_EMAIL);
+    console.log(`[Email] Filled: ${TEST_EMAIL}`);
+
+    await page.locator('button:has-text("Next"), button:has-text("Send"), button:has-text("Continue")').first().click();
+    await page.waitForTimeout(3000);
+
+    console.log('\n=== STEP 4: After email submit ===');
+    await dumpFull(page, 'Step 4: After email submit');
+  } else {
+    console.log('[Email input] NOT FOUND — check Step 3 snapshot');
+  }
+
+  // ── Step 5: handle OTP step (mocked — just click next if input appears) ───
+  const otpInput = page.locator('input[placeholder*="code" i], input[placeholder*="otp" i], input[maxlength="6"], input[maxlength="4"]').first();
+  if (await otpInput.count() > 0) {
+    await otpInput.fill('123456');
+    console.log('[OTP] Filled mock code');
+
+    await page.locator('button:has-text("Verify"), button:has-text("Next"), button:has-text("Confirm")').first().click();
+    await page.waitForTimeout(3000);
+
+    console.log('\n=== STEP 5: After OTP submit ===');
+    await dumpFull(page, 'Step 5: After OTP submit');
+  } else {
+    console.log('[OTP input] NOT FOUND — OTP step may have been skipped by mock or different selector');
+    console.log('\n=== STEP 5: Current state (no OTP input) ===');
+    await dumpFull(page, 'Step 5: No OTP input found');
+  }
+
+  // ── Step 6: profile/details form ──────────────────────────────────────────
+  await page.waitForTimeout(2000);
+  console.log('\n=== STEP 6: Profile/details form ===');
+  await dumpFull(page, 'Step 6: Profile/details form');
+
+  // Try to fill visible text inputs one by one — just to see what fields exist
+  const allInputs = await page.locator('input:visible').all();
+  console.log(`[Profile] Found ${allInputs.length} visible inputs`);
+  for (let i = 0; i < allInputs.length; i++) {
+    const inp = allInputs[i];
+    const ph = await inp.getAttribute('placeholder').catch(() => '');
+    const nm = await inp.getAttribute('name').catch(() => '');
+    const tp = await inp.getAttribute('type').catch(() => '');
+    console.log(`  [input ${i}] type=${tp} name=${nm} placeholder=${ph}`);
+  }
+
+  // ── Step 7: OTP — 6x input.code-input ────────────────────────────────────
+  const otpInputs = page.locator('input.code-input');
+  const otpCount  = await otpInputs.count();
+  if (otpCount > 0) {
+    console.log(`[OTP] Found ${otpCount} code inputs (input.code-input) — filling 1..6`);
+    for (let i = 0; i < otpCount; i++) {
+      await otpInputs.nth(i).click();
+      await otpInputs.nth(i).fill(String(i + 1));
+    }
+    const verifyBtn = page.locator('button.verify-btn');
+    if (await verifyBtn.count() > 0) {
+      console.log(`[OTP] verify-btn found, enabled=${await verifyBtn.isEnabled()}`);
+      await verifyBtn.click();
+      await page.waitForTimeout(4000);
+      console.log('\n=== STEP 7: After OTP verify ===');
+      await dumpFull(page, 'Step 7: After OTP verify');
+    }
+  } else {
+    console.log('[OTP] input.code-input NOT found');
+  }
+
+  // ── Step 8: Profile/details form (post-OTP) ───────────────────────────────
+  await page.waitForTimeout(2000);
+  console.log('\n=== STEP 8: Profile form (post-OTP) ===');
+  await dumpFull(page, 'Step 8: Profile form');
+
+  // Fill password fields if present
+  const pwdInputs = await page.locator('input[type="password"]').all();
+  if (pwdInputs.length > 0) {
+    for (const inp of pwdInputs) await inp.fill('66666666');
+    console.log(`[Password] Filled ${pwdInputs.length} password input(s)`);
+  }
+
+  // Fill all visible text inputs
+  const textInputs = await page.locator('input[type="text"]:visible, input[type="email"]:visible').all();
+  console.log(`[Profile] Found ${textInputs.length} text/email inputs`);
+  for (const inp of textInputs) {
+    const ph = await inp.getAttribute('placeholder').catch(() => '');
+    const nm = await inp.getAttribute('name').catch(() => '');
+    const cl = await inp.getAttribute('class').catch(() => '');
+    console.log(`  → placeholder="${ph}" name="${nm}" class="${cl}"`);
+  }
+
+  // ── Step 9: Submit whatever button is on this form ────────────────────────
+  const submitBtns = await page.locator('button[type="submit"]:visible').all();
+  console.log(`[Submit] Found ${submitBtns.length} submit buttons`);
+  for (const btn of submitBtns) {
+    const txt = await btn.textContent().catch(() => '');
+    const cls = await btn.getAttribute('class').catch(() => '');
+    const dis = await btn.isDisabled().catch(() => true);
+    console.log(`  → text="${txt?.trim()}" class="${cls}" disabled=${dis}`);
+  }
+
+  // ── Step 9: payment step (if reached) ─────────────────────────────────────
+  await page.waitForTimeout(2000);
+  console.log('\n=== STEP 9: Final state (payment page?) ===');
+  await dumpFull(page, 'Step 9: Final state');
+  console.log('[URL]', page.url());
 });

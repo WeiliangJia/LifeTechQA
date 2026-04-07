@@ -1,24 +1,30 @@
 /**
  * Professional User Registration Flow
  *
- * Flow:
+ * Confirmed flow (from DOM exploration 2026-04-07):
  *   / → "Create a new account now!" → /register
- *   → click "Professional User" card
- *   → click "Email Address" → fill mock email → Continue
- *   → OTP verification (mocked — any 6-digit code accepted)
- *   → professional info form (fields may differ from Regular User)
- *   → /register/payment-registration
- *   → card 0341 (decline) → close dialog → reopen → card 4242 (success)
+ *   → click "Professional User" card (div.user-card → /register/register-type?userType=RP)
+ *   → click "Email Address" (button.method-btn) → fill mock email → button.continue-btn
+ *   → OTP: /register/verify-code?type=email&userType=RP (6× input.code-input, mocked)
+ *   → Complete Profile: /register/complete-profile?type=email&userType=RP
+ *     Fields: Sub-Category (El-Plus), Title (El-Plus), First/Last Name, Address, City,
+ *             State, Country (El-Plus), Postcode, Mobile Phone (+code El-Plus),
+ *             Enter Registration Number, Company Name, Password, Confirm Password
+ *     Submit: button.submit-btn "Signup"
+ *   → Verification: /register/verification?type=email
+ *     Fields: Enter Bar/License Number, file upload (image/JPEG accepted)
+ *     Submit: button.submit-btn "Submit for Verification"
+ *     API: POST /api/user/createUser → userId assigned
+ *   → Navigates to /entities (main dashboard) — NO payment step in registration
  *
  * Rules:
  *   - Mock email: autotest+{timestamp}@mailtest.com
- *   - Mock OTP:   intercept verify endpoints, any code accepted
+ *   - Mock OTP:   intercept verify/otp endpoints
  *   - Password:   66666666
- *   - Payment:    0341 fail first, then 4242 success
+ *   - No payment in this flow (professional users go straight to dashboard after verification)
  */
 import { test, expect } from '@playwright/test';
-import { fillCard, dumpSnapshot } from './helpers';
-import { CARDS } from './fixtures';
+import { dumpSnapshot } from './helpers';
 
 test.setTimeout(300000);
 
@@ -27,6 +33,8 @@ test.setTimeout(300000);
 const RUN_ID        = Date.now();
 const TEST_EMAIL    = `autotest+${RUN_ID}@mailtest.com`;
 const TEST_PASSWORD = '66666666';
+// Unique phone number per run: 04 + last 8 digits of timestamp (avoids "phone already exists" conflicts)
+const TEST_PHONE    = `04${String(RUN_ID).slice(-8)}`;
 
 // ─── OTP mock ─────────────────────────────────────────────────────────────────
 
@@ -36,6 +44,8 @@ async function mockOtp(page: Parameters<typeof fillCard>[0]) {
     '**/api/auth/registerprofessionalbyemail*',
     '**/api/auth/verify**',
     '**/api/*/otp**',
+    '**/api/*/verification*',   // professional verification document submission
+    '**/api/*/upload*',         // file upload endpoint (if any)
   ]) {
     await page.route(pattern, route => route.fulfill({
       status: 200,
@@ -43,7 +53,7 @@ async function mockOtp(page: Parameters<typeof fillCard>[0]) {
       body: JSON.stringify({ success: true, message: 'Verified' }),
     }));
   }
-  console.log(`[Mock] OTP mocked — email: ${TEST_EMAIL}`);
+  console.log(`[Mock] OTP + verification endpoints mocked — email: ${TEST_EMAIL}`);
 }
 
 // ─── Selectors ────────────────────────────────────────────────────────────────
@@ -68,48 +78,29 @@ const S = {
   otpInput:        'input.code-input',
   verifyBtn:       'button.verify-btn',
 
-  // Personal / professional info form
-  firstNameInput:  'input[placeholder="First Name"]',
-  lastNameInput:   'input[placeholder="Last Name"]',
-  addressInput:    'input[placeholder="Address Line"]',
-  cityInput:       'input[placeholder="City"]',
-  stateInput:      'input[placeholder="State"]',
-  postcodeInput:   'input[placeholder="Postcode"]',
-  phoneInput:      'input[placeholder="Mobile Phone"]',
-  passwordInput:   'input[placeholder="Password"]',
-  confirmPwdInput: 'input[placeholder="Confirm Password"]',
-  submitBtn:       'button.submit-btn',
+  // Personal / professional info form (confirmed from DOM: /register/complete-profile?userType=RP)
+  // El-Plus dropdowns on this page: Sub-Category, Title, Country, Phone code (handled by .el-select loop)
+  firstNameInput:       'input[placeholder="First Name"]',
+  lastNameInput:        'input[placeholder="Last Name"]',
+  addressInput:         'input[placeholder="Address Line"]',
+  cityInput:            'input[placeholder="City"]',
+  stateInput:           'input[placeholder="State"]',
+  postcodeInput:        'input[placeholder="Postcode"]',
+  phoneInput:           'input[placeholder="Mobile Phone"]',
+  registrationNumber:   'input[placeholder="Enter Registration Number"]',
+  companyName:          'input[placeholder="Company Name"]',
+  passwordInput:        'input[placeholder="Password"]',
+  confirmPwdInput:      'input[placeholder="Confirm Password"]',
+  // Submit button text is "Signup" on this page
+  submitBtn:            'button:has-text("Signup"), button.submit-btn',
 
-  // Payment dialog
-  stripeCardIframe: 'iframe[title="Secure card number input frame"]',
-  payBtn:           'button.pay-button',
-  closeDialogBtn:   'button.el-dialog__headerbtn',
 };
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-async function selectNewCard(page: Parameters<typeof fillCard>[0]) {
-  const candidates = [
-    page.locator('text=Use a different card'),
-    page.locator('[class*="new-card"]'),
-    page.locator('[class*="different"]'),
-  ];
-  for (const loc of candidates) {
-    if (await loc.count() > 0) {
-      await loc.first().click();
-      console.log('[Card] ✓ "Use a different card" clicked');
-      await page.waitForTimeout(1000);
-      return;
-    }
-  }
-  console.log('[Card] Stripe form already open directly');
-}
 
 // ─── Main test ────────────────────────────────────────────────────────────────
 
 test.describe('Professional User Registration', () => {
 
-  test('register professional → 0341 fail → 4242 success', async ({ page }) => {
+  test('register professional user → dashboard', async ({ page }) => {
 
     // Log all app API calls
     page.on('response', async res => {
@@ -203,6 +194,8 @@ test.describe('Professional User Registration', () => {
     await page.screenshot({ path: 'screenshots/17-s7-after-otp.png', fullPage: true });
 
     // ── STEP 8: Professional info form ───────────────────────────────────────
+    // After OTP, page navigates to /register/complete-profile?type=email&userType=RP
+    await page.waitForURL('**/complete-profile**', { timeout: 15000 });
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(1500);
     await dumpSnapshot(page, 'Step 8 — Professional info form (discover all fields)');
@@ -241,15 +234,17 @@ test.describe('Professional User Registration', () => {
     // Fill standard fields — skip silently if not present
     // (professional form may have extra or different fields; dumpSnapshot above reveals them)
     const standardFields: Array<{ sel: string; value: string; label: string }> = [
-      { sel: S.firstNameInput,  value: 'Test',        label: 'first name'  },
-      { sel: S.lastNameInput,   value: 'AutoPro',     label: 'last name'   },
-      { sel: S.addressInput,    value: '1 Pro Street',label: 'address'     },
-      { sel: S.cityInput,       value: 'Melbourne',   label: 'city'        },
-      { sel: S.stateInput,      value: 'VIC',         label: 'state'       },
-      { sel: S.postcodeInput,   value: '3000',        label: 'postcode'    },
-      { sel: S.phoneInput,      value: '0411111111',  label: 'phone'       },
-      { sel: S.passwordInput,   value: TEST_PASSWORD, label: 'password'    },
-      { sel: S.confirmPwdInput, value: TEST_PASSWORD, label: 'confirm pwd' },
+      { sel: S.firstNameInput,     value: 'Test',           label: 'first name'         },
+      { sel: S.lastNameInput,      value: 'AutoPro',        label: 'last name'          },
+      { sel: S.addressInput,       value: '1 Pro Street',   label: 'address'            },
+      { sel: S.cityInput,          value: 'Melbourne',      label: 'city'               },
+      { sel: S.stateInput,         value: 'VIC',            label: 'state'              },
+      { sel: S.postcodeInput,      value: '3000',           label: 'postcode'           },
+      { sel: S.phoneInput,         value: TEST_PHONE,       label: 'phone'              },
+      { sel: S.registrationNumber, value: 'ACN123456789',   label: 'registration number'},
+      { sel: S.companyName,        value: 'AutoTest Pro Pty',label: 'company name'      },
+      { sel: S.passwordInput,      value: TEST_PASSWORD,    label: 'password'           },
+      { sel: S.confirmPwdInput,    value: TEST_PASSWORD,    label: 'confirm pwd'        },
     ];
 
     for (const { sel, value, label } of standardFields) {
@@ -292,106 +287,80 @@ test.describe('Professional User Registration', () => {
     await page.screenshot({ path: 'screenshots/17-s9-after-submit.png', fullPage: true });
     await dumpSnapshot(page, 'Step 9 — after profile submit');
 
-    // ── STEP 10: Payment page ─────────────────────────────────────────────────
-    const stripeIframe = page.locator(S.stripeCardIframe);
-    const onPaymentPage = await stripeIframe.waitFor({ timeout: 20000 })
-      .then(() => true)
-      .catch(async () => {
-        await dumpSnapshot(page, 'Step 10 — Stripe form NOT found');
-        console.warn('[Step 10] Stripe form not found — check screenshot 17-s9-after-submit.png');
-        return false;
-      });
+    // ── STEP 10: Verification page (professional-specific) ────────────────────
+    // After profile submit: /register/verification?type=email
+    // Fields: Bar/License Number (text) + document file upload + "Submit for Verification"
+    const onVerificationPage = page.url().includes('/verification');
+    if (onVerificationPage) {
+      console.log('\n[Step 10] Verification page detected');
+      await dumpSnapshot(page, 'Step 10 — Verification page');
 
-    if (!onPaymentPage) return;
-    console.log('\n[Step 10] Payment page loaded ✓');
-    await page.screenshot({ path: 'screenshots/17-s10-payment.png', fullPage: true });
+      const barLicenseInput = page.locator('input[placeholder="Enter Bar/License Number"]').first();
+      if (await barLicenseInput.count() > 0) {
+        await barLicenseInput.fill('LIC-AUTOTEST-001');
+        console.log('[Step 10] ✓ Bar/License Number filled');
+      }
 
-    const payBtn = page.locator(S.payBtn);
+      // Upload a minimal JPEG file (common accepted format for document uploads)
+      // Minimal valid JPEG header bytes
+      const jpegHeader = Buffer.from([
+        0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
+        0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xD9,
+      ]);
+      const fileInput = page.locator('input[type="file"]').first();
+      if (await fileInput.count() > 0) {
+        await fileInput.setInputFiles({
+          name: 'autotest-doc.jpg',
+          mimeType: 'image/jpeg',
+          buffer: jpegHeader,
+        });
+        console.log('[Step 10] ✓ Dummy JPEG file set for document upload');
+      }
 
-    // ── PAYMENT ATTEMPT 1: 0341 (expect decline) ──────────────────────────────
-    console.log('\n── Attempt 1: card 0341 (expect decline) ──');
-    await selectNewCard(page);
-    await fillCard(page, CARDS.three_d_secure_fail);
-    await page.screenshot({ path: 'screenshots/17-p1-filled.png' });
+      // Log ALL requests to discover the verification submission endpoint
+      const requestLog: string[] = [];
+      const reqListener = (req: import('@playwright/test').Request) => {
+        requestLog.push(`${req.method()} ${req.url()}`);
+      };
+      page.on('request', reqListener);
 
-    const backendRes1Promise = page.waitForResponse(
-      res => res.url().includes('/api/payments') && res.request().method() === 'POST',
-      { timeout: 30000 }
-    ).catch(() => null);
+      const verificationSubmitBtn = page.locator('button.submit-btn:has-text("Submit for Verification")');
+      if (await verificationSubmitBtn.count() > 0) {
+        // Check for any visible validation errors before clicking
+        const preErrors = await page.locator('.el-form-item__error:visible, [class*="error"]:visible').allInnerTexts().catch(() => []);
+        if (preErrors.length) console.log('[Step 10] Pre-click errors:', preErrors);
 
-    await payBtn.click();
-    console.log('[Payment] Pay button clicked (attempt 1)');
+        await verificationSubmitBtn.click();
+        console.log('[Step 10] Submit for Verification clicked');
+        await page.waitForTimeout(4000);
 
-    const backendRes1 = await backendRes1Promise;
-    if (backendRes1) {
-      const body = await backendRes1.json().catch(() => null);
-      console.log(`[Attempt 1 API] ${backendRes1.status()} ${backendRes1.url()}`);
-      if (body) console.log('[Attempt 1 API body]', JSON.stringify(body).slice(0, 500));
-    }
+        // Check for validation errors after clicking
+        const postErrors = await page.locator('.el-form-item__error:visible, [class*="error"]:visible, .el-message--error:visible').allInnerTexts().catch(() => []);
+        if (postErrors.length) console.log('[Step 10] Post-click errors:', postErrors);
 
-    await page.waitForTimeout(3000);
-    await dumpSnapshot(page, 'Attempt 1 — error notification');
-    await page.screenshot({ path: 'screenshots/17-p1-result.png', fullPage: true });
+        // Report all requests that fired
+        page.off('request', reqListener);
+        console.log(`[Step 10] Network requests fired (${requestLog.length}):`);
+        requestLog.filter(r => r.includes('lifetech.star-x-tech.com') || r.includes('/api/')).forEach(r => console.log('  ', r));
 
-    const has0341Error = await page.locator('text=/declined|failed|authentication|invalid/i').count() > 0;
-    console.log('[Attempt 1] Decline error shown:', has0341Error);
-
-    // Close payment dialog
-    const closeBtn = page.locator(S.closeDialogBtn);
-    if (await closeBtn.count() > 0) {
-      await closeBtn.click();
-      console.log('[Attempt 1] Dialog closed via X button');
-    } else {
-      console.warn('[Attempt 1] Close button not found');
-    }
-    await page.waitForTimeout(1000);
-
-    // ── PAYMENT ATTEMPT 2: 4242 (expect success) ──────────────────────────────
-    console.log('\n── Attempt 2: card 4242 (expect success) ──');
-
-    // Re-open payment dialog by clicking the payment/plan button again
-    // For registration flow the form may reappear automatically; check first
-    const stripeGone = !(await stripeIframe.isVisible().catch(() => false));
-    if (stripeGone) {
-      // Try to find a retry / pay button on the page
-      const retryBtn = page.locator('button:has-text("Pay"), button:has-text("Continue"), button.pay-button, button.submit-button').first();
-      if (await retryBtn.count() > 0) {
-        await retryBtn.click();
-        await page.waitForTimeout(2000);
-        console.log('[Attempt 2] Re-opened payment form');
-      } else {
-        await dumpSnapshot(page, 'Attempt 2 — payment form gone, no retry button found');
-        console.warn('[Attempt 2] Cannot find payment form — check dumpSnapshot');
+        console.log('[Step 10] After submit →', page.url());
+        await dumpSnapshot(page, 'Step 10 — after verification submit');
       }
     }
 
-    await selectNewCard(page);
-    await fillCard(page, {
-      number: '4242 4242 4242 4242',
-      expiry: '09/29',
-      cvc:    '424',
-      name:   'Test AutoPro',
-    });
-    await page.screenshot({ path: 'screenshots/17-p2-filled.png' });
+    // ── STEP 11: Assert registration success ─────────────────────────────────
+    // Professional users are created via POST /api/user/createUser and redirected
+    // to /entities (main dashboard) — there is NO payment step in registration.
+    const finalUrl = page.url();
+    console.log('\n[Final] URL after registration:', finalUrl);
 
-    const backendRes2Promise = page.waitForResponse(
-      res => res.url().includes('/api/payments') && res.request().method() === 'POST',
-      { timeout: 30000 }
-    ).catch(() => null);
+    const onDashboard = finalUrl.includes('/entities') ||
+                        finalUrl.includes('/dashboard') ||
+                        finalUrl.includes('/wallet') ||
+                        (!finalUrl.includes('/register') && !finalUrl.includes('/login'));
 
-    await payBtn.click();
-    console.log('[Payment] Pay button clicked (attempt 2)');
-    const backendRes2 = await backendRes2Promise;
-
-    await page.waitForTimeout(6000);
-    await page.screenshot({ path: 'screenshots/17-p2-result.png', fullPage: true });
-    await dumpSnapshot(page, 'After 4242 payment — success page');
-
-    const success = await page.locator('text=/success|paid|complete|thank|完成|成功/i').count() > 0;
-    console.log('\n[Final Result] Payment success:', success);
-    if (backendRes2) console.log('[Final Result] API:', backendRes2.status(), backendRes2.url());
-
-    expect(success).toBeTruthy();
+    console.log('[Final Result] Registration success:', onDashboard);
+    expect(onDashboard, `Expected dashboard URL, got: ${finalUrl}`).toBeTruthy();
   });
 
 });
