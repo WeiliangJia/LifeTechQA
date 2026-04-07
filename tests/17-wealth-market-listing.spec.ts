@@ -312,8 +312,18 @@ async function createEntityAndPaySetupFee(page: Page) {
 
   expect(entityPaySuccess, 'New entity setup fee payment should succeed').toBeTruthy();
 
-  // Ensure data settle before marketplace listing query
-  await page.waitForTimeout(3000);
+  // Close the payment dialog if still open (it blocks navigation clicks)
+  await page.waitForTimeout(1500);
+  const closeBtn = page.locator('button.el-dialog__headerbtn').last();
+  if (await closeBtn.isVisible().catch(() => false)) {
+    await closeBtn.click();
+    console.log('[Entity Fee] Closed payment dialog after success');
+    await page.waitForTimeout(500);
+  }
+  // Dismiss any success overlay/toast blocking the page
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(2000);
+
   return { entityName };
 }
 
