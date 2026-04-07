@@ -322,7 +322,8 @@ async function createEntityAndPaySetupFee(page: Page) {
   }
   // Dismiss any success overlay/toast blocking the page
   await page.keyboard.press('Escape');
-  await page.waitForTimeout(2000);
+  // Wait for backend to index the new entity before marketplace listing query
+  await page.waitForTimeout(5000);
 
   return { entityName };
 }
@@ -342,7 +343,8 @@ async function openListDialogAndSelectEntity(page: Page, entityName: string) {
     if (await input.count() > 0) {
       await input.fill('');
       await input.type(entityName.slice(0, 24), { delay: 40 });
-      await page.waitForTimeout(900);
+      // Wait longer for El-Plus dropdown to debounce + fetch from API
+      await page.waitForTimeout(2000);
     }
 
     const exact = page
@@ -357,13 +359,15 @@ async function openListDialogAndSelectEntity(page: Page, entityName: string) {
       return true;
     }
 
+    console.log(`[Wealth Market] attempt ${attempt}/${maxAttempts}: entity not found in dropdown yet`);
     const close = page.locator(`${S.selectListingDialog} .el-dialog__headerbtn`).first();
     if (await close.count() > 0) await close.click();
-    await page.waitForTimeout(700);
+    await page.waitForTimeout(1000);
 
     if (attempt < maxAttempts) {
       await page.reload();
-      await page.waitForTimeout(1200);
+      // Give backend more time to sync the newly created entity
+      await page.waitForTimeout(3000);
     }
   }
   return false;
