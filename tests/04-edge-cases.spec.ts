@@ -17,7 +17,8 @@ test.describe('Edge Cases', () => {
     page.on('pageerror', err => errors.push(err.message));
 
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000); // collection window for initial console errors
 
     console.log('[Console Errors]', errors.length > 0 ? errors : 'None');
     // Report but don't hard-fail — some third-party errors are acceptable
@@ -30,7 +31,11 @@ test.describe('Edge Cases', () => {
     page.on('pageerror', err => errors.push(err.message));
 
     await login(page);
-    await page.waitForLoadState('networkidle');
+    // NOTE: Do NOT use waitForLoadState('networkidle') — the post-login home
+    // page polls several APIs continuously (giftcards, entities, connections)
+    // and never becomes network-idle, causing this test to time out.
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000); // collection window for initial console errors
 
     console.log('[Console Errors on Payment Page]', errors.length > 0 ? errors : 'None');
     if (errors.length > 0) console.warn('[WARN] Console errors:', errors);

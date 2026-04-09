@@ -322,52 +322,309 @@ async function createEntityAndPaySetupFee(page: Page) {
   }
   // Dismiss any success overlay/toast blocking the page
   await page.keyboard.press('Escape');
-  // Wait for backend to index the new entity before marketplace listing query
-  await page.waitForTimeout(5000);
+  await page.waitForTimeout(1000);
+
+  // NOTE: Do NOT poll /entities page here — that query uses a different
+  // backend index from `ableToList=true`, so a positive match on /entities
+  // doesn't guarantee the Wealth Market dropdown will have the entity.
+  // `waitForEntityListable` (called later from openListDialogAndSelectEntity)
+  // polls the correct endpoint directly and is the single source of truth.
+  // Just navigate away from the payment dialog so it doesn't block anything.
+  await page.goto('/entities', { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(1500);
 
   return { entityName };
 }
 
+async function findVisibleOptionByText(page: Page, entityName: string) {
+  // Element Plus teleports dropdowns to body, so there can be multiple stale
+  // .el-select-dropdown in DOM. Iterate all matches and return the first
+  // VISIBLE one rather than blindly using .first().
+  const matches = page
+    .locator(S.selectEntityOption)
+    .filter({ hasText: entityName });
+  const count = await matches.count();
+  for (let i = 0; i < count; i++) {
+    const opt = matches.nth(i);
+    if (await opt.isVisible().catch(() => false)) return opt;
+  }
+  return null;
+}
+
+async function scrollDropdownToLoadAll(page: Page) {
+  // Scroll the currently visible el-select dropdown body to trigger rendering
+  // of virtualized / lazy-loaded options.
+  await page.evaluate(async () => {
+    const dropdowns = Array.from(
+      document.querySelectorAll('.el-select-dropdown'),
+    ) as HTMLElement[];
+    const visible = dropdowns.find(
+      d => d.offsetWidth > 0 && d.offsetHeight > 0,
+    );
+    if (!visible) return;
+    const wrap =
+      (visible.querySelector('.el-scrollbar__wrap') as HTMLElement | null)
+      ?? (visible.querySelector('.el-select-dropdown__wrap') as HTMLElement | null);
+    if (!wrap) return;
+    const step = Math.max(120, Math.floor(wrap.clientHeight * 0.8));
+    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+    for (let y = 0; y <= wrap.scrollHeight + step; y += step) {
+      wrap.scrollTop = y;
+      await sleep(150);
+    }
+    wrap.scrollTop = 0;
+    await sleep(100);
+  });
+}
+
+function pickEntityName(record: Record<string, unknown>): string {
+  const candidates = [
+    record.name,
+    record.entityName,
+    record.entity_name,
+    record.companyName,
+    record.company_name,
+    record.displayName,
+    record.title,
+  ];
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.trim()) return c.trim();
+  }
+  return '';
+}
+
+function pickEntityId(record: Record<string, unknown>): string | number | null {
+  const candidates = [
+    record.id,
+    record.entityId,
+    record.entity_id,
+    record.uuid,
+    record._id,
+  ];
+  for (const c of candidates) {
+    if (typeof c === 'string' || typeof c === 'number') return c;
+  }
+  return null;
+}
+
+/**
+ * Given the listable-entities API response (already parsed via
+ * extractRecordArray), find the target entity by exact name and return its
+ * array index + id. Returns { index: -1, id: null } if not found.
+ */
+function findEntityInListable(
+  listable: Record<string, unknown>[],
+  entityName: string,
+): { index: number; id: string | number | null } {
+  const target = entityName.trim();
+  for (let i = 0; i < listable.length; i++) {
+    if (pickEntityName(listable[i]) === target) {
+      return { index: i, id: pickEntityId(listable[i]) };
+    }
+  }
+  return { index: -1, id: null };
+}
+
+/**
+ * Click the N-th enabled option in the currently-visible el-select dropdown
+ * from inside the page (so we can scroll virtualized lists into view before
+ * clicking). Returns the trimmed text content of the clicked option, or null
+ * if the index is out of range / no visible dropdown exists.
+ */
+async function clickOptionAtIndex(page: Page, index: number): Promise<string | null> {
+  return page.evaluate((idx) => {
+    const dropdowns = Array.from(
+      document.querySelectorAll('.el-select-dropdown'),
+    ) as HTMLElement[];
+    const visible = dropdowns.find(d => {
+      const r = d.getBoundingClientRect();
+      const cs = getComputedStyle(d);
+      return r.width > 0 && r.height > 0 && cs.display !== 'none' && cs.visibility !== 'hidden';
+    });
+    if (!visible) return null;
+    const items = Array.from(
+      visible.querySelectorAll('.el-select-dropdown__item:not(.is-disabled)'),
+    ) as HTMLElement[];
+    if (idx < 0 || idx >= items.length) return null;
+    items[idx].scrollIntoView({ block: 'center' });
+    items[idx].click();
+    return (items[idx].textContent || '').trim();
+  }, index);
+}
+
+/**
+ * Poll the /api/entities/by-user/{id}?ableToList=true endpoint DIRECTLY
+ * (via page.evaluate fetch, so browser auth cookies/tokens are reused) until
+ * the newly-created entity appears in the response.
+ *
+ * This avoids the slow UI retry loop (open dialog → click select → close → reload)
+ * when the real bottleneck is backend index sync — which can take 1–3 minutes.
+ */
+async function waitForEntityListable(
+  page: Page,
+  entityName: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const start = Date.now();
+  let attempt = 0;
+  while (Date.now() - start < timeoutMs) {
+    attempt++;
+    const payload = await page.evaluate(async () => {
+      const userId =
+        localStorage.getItem('userId')
+        ?? localStorage.getItem('user_id')
+        ?? localStorage.getItem('uid');
+      if (!userId) return { error: 'no userId in localStorage' };
+      const token =
+        localStorage.getItem('token')
+        ?? localStorage.getItem('access_token')
+        ?? localStorage.getItem('authToken')
+        ?? '';
+      try {
+        const res = await fetch(`/api/entities/by-user/${userId}?ableToList=true`, {
+          credentials: 'include',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) return { error: `status ${res.status}` };
+        return { data: await res.json() };
+      } catch (e) {
+        return { error: String(e) };
+      }
+    }).catch(() => null as { data?: unknown; error?: string } | null);
+
+    if (payload && 'data' in payload && payload.data !== undefined) {
+      const list = extractRecordArray(payload.data);
+      const names = list.map(pickEntityName).filter(Boolean);
+      const found = names.some(n => n === entityName.trim());
+      console.log(
+        `[waitForEntityListable #${attempt}] ${list.length} listable entities`
+        + (names.length ? ` → [${names.slice(0, 10).join(', ')}${names.length > 10 ? ', ...' : ''}]` : '')
+        + ` | target="${entityName}" inApi=${found}`,
+      );
+      if (found) {
+        console.log(
+          `[waitForEntityListable] entity listable after ${((Date.now() - start) / 1000).toFixed(1)}s`,
+        );
+        return true;
+      }
+    } else {
+      console.log(
+        `[waitForEntityListable #${attempt}] fetch error: ${payload?.error ?? 'unknown'}`,
+      );
+    }
+
+    // Poll every 2s — tight enough to catch fast index updates without
+    // hammering the server
+    if (Date.now() - start + 2000 >= timeoutMs) break;
+    await page.waitForTimeout(2000);
+  }
+  return false;
+}
+
 async function openListDialogAndSelectEntity(page: Page, entityName: string) {
-  const maxAttempts = 6;
+  // Step 1: pre-poll the backend directly until the new entity appears in
+  // the listable-entities response. Lightweight (fetch every 2s) — much
+  // cheaper than repeatedly reopening the dialog from the UI. The 180s
+  // ceiling is deliberately generous: on slow backend days the listable
+  // index can lag by 60–120s, and we'd rather wait here than burn budget
+  // on UI retry (each UI attempt costs ~10s of reload + dialog animation).
+  const apiReady = await waitForEntityListable(page, entityName, 180000);
+  if (!apiReady) {
+    console.warn(
+      `[Wealth Market] entity "${entityName}" still NOT in ableToList API after 180s`
+      + ' — UI retry will still attempt, but this usually indicates a backend /'
+      + ' business-rule issue (e.g. wrong entity type or plan tier).',
+    );
+  }
+
+  // Step 2: open the dialog and select the option. Because the pre-poll has
+  // already verified backend readiness, 3 attempts is plenty — this only
+  // guards against transient DOM rendering races.
+  const maxAttempts = 3;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const listClicked = await clickFirstVisible(page, [S.listEntityBtn]);
     expect(listClicked, '"List Your Entity" button should be visible').toBeTruthy();
     await expect(page.locator(S.selectListingDialog)).toBeVisible({ timeout: 10000 });
 
+    // Capture the API response triggered by opening the el-select. This is
+    // the ground truth the dropdown is built from.
+    const apiPromise = page.waitForResponse(
+      res =>
+        res.request().method() === 'GET'
+        && /\/api\/entities\/by-user\/\d+.*ableToList=true/i.test(res.url()),
+      { timeout: 15000 },
+    ).catch(() => null);
+
     const select = page.locator(S.selectEntity).first();
     await select.click();
-    await page.waitForTimeout(500);
 
-    const input = page.locator(`${S.selectListingDialog} .el-select input`).last();
-    if (await input.count() > 0) {
-      await input.fill('');
-      await input.type(entityName.slice(0, 24), { delay: 40 });
-      // Wait longer for El-Plus dropdown to debounce + fetch from API
-      await page.waitForTimeout(2000);
+    const apiRes = await apiPromise;
+    const apiBody = await apiRes?.json().catch(() => null);
+    const listable = extractRecordArray(apiBody);
+
+    // On first attempt, log the raw shape of an entity so we can verify
+    // `pickEntityName` / `pickEntityId` are reading the right fields.
+    if (attempt === 1 && listable.length > 0) {
+      console.log(
+        '[Wealth Market] sample listable entity shape:',
+        JSON.stringify(listable[0]).slice(0, 400),
+      );
     }
 
-    const exact = page
-      .locator(S.selectEntityOption)
-      .filter({ hasText: entityName })
-      .first();
+    const apiNames = listable.map(pickEntityName).filter(Boolean);
+    const { index: targetIdx, id: targetId } = findEntityInListable(listable, entityName);
 
-    const found = await exact.count() > 0 && await exact.isVisible().catch(() => false);
-    if (found) {
-      await exact.click();
-      console.log('[Wealth Market] selected new entity:', entityName);
-      return true;
+    console.log(
+      `[Wealth Market] attempt ${attempt}/${maxAttempts}: ${listable.length} listable entities`
+      + ` | target="${entityName}" apiIndex=${targetIdx} apiId=${targetId}`
+      + (apiNames.length
+        ? ` | names=[${apiNames.slice(0, 10).join(', ')}${apiNames.length > 10 ? ', ...' : ''}]`
+        : ''),
+    );
+
+    if (targetIdx >= 0) {
+      // Strategy A: click the option at the exact index the API told us
+      await page.waitForTimeout(400); // allow options to render
+      const clickedText = await clickOptionAtIndex(page, targetIdx);
+      if (clickedText && clickedText === entityName.trim()) {
+        console.log(
+          `[Wealth Market] selected "${entityName}" via API index ${targetIdx}`,
+        );
+        return true;
+      }
+
+      if (clickedText !== null && clickedText !== entityName.trim()) {
+        console.warn(
+          `[Wealth Market] index ${targetIdx} text mismatch: dropdown="${clickedText}"`
+          + ` vs target="${entityName}" — DOM order may differ from API`,
+        );
+      }
+
+      // Strategy B: fall back to text match (handles DOM/API order mismatch)
+      await scrollDropdownToLoadAll(page);
+      const match = await findVisibleOptionByText(page, entityName);
+      if (match) {
+        await match.click();
+        console.log('[Wealth Market] selected entity via text fallback:', entityName);
+        return true;
+      }
+      console.warn(
+        '[Wealth Market] entity in API response but not clickable in dropdown DOM — will retry',
+      );
+    } else {
+      console.log(
+        `[Wealth Market] "${entityName}" NOT in this attempt's ableToList response`
+        + ' — backend may have evicted it since the pre-poll; will retry',
+      );
     }
 
-    console.log(`[Wealth Market] attempt ${attempt}/${maxAttempts}: entity not found in dropdown yet`);
     const close = page.locator(`${S.selectListingDialog} .el-dialog__headerbtn`).first();
     if (await close.count() > 0) await close.click();
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(800);
 
     if (attempt < maxAttempts) {
-      await page.reload();
-      // Give backend more time to sync the newly created entity
-      await page.waitForTimeout(3000);
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(4000);
     }
   }
   return false;
@@ -428,13 +685,55 @@ async function closeAnyBlockingDialog(page: Page) {
   await page.waitForTimeout(700);
 }
 
+async function verifyStripeCardFilled(page: Page): Promise<boolean> {
+  // Stripe marks empty inputs with `is-empty` and unfilled inputs with
+  // `Input--empty`. After a successful fill the class should include neither.
+  return page.evaluate(() => {
+    const frames = Array.from(document.querySelectorAll(
+      'iframe[title="Secure card number input frame"]',
+    )) as HTMLIFrameElement[];
+    for (const f of frames) {
+      try {
+        const doc = f.contentDocument;
+        if (!doc) continue;
+        const input = doc.querySelector('input[name="cardnumber"]') as HTMLInputElement | null;
+        if (!input) continue;
+        const cls = input.className || '';
+        // Consider "filled" if it has neither empty nor invalid markers
+        if (!/is-empty|Input--empty|is-invalid/.test(cls)) return true;
+      } catch {
+        // cross-origin iframe — can't introspect; assume OK
+        return true;
+      }
+    }
+    return false;
+  });
+}
+
 async function runPaymentAttempt(
   page: Page,
   card: CardData,
   expected: 'fail' | 'success',
 ): Promise<Response | null> {
   await ensureStripeFormReady(page);
+
+  // Stripe iframes are notoriously flaky about key dispatch when the iframe
+  // is still settling. Let the iframe finish its internal init before we
+  // start typing, then verify the card number actually made it in. If not,
+  // retry fillCard once.
+  await page.waitForTimeout(1500);
   await fillCard(page, card);
+  await page.waitForTimeout(800);
+
+  const filled = await verifyStripeCardFilled(page).catch(() => true);
+  if (!filled) {
+    console.warn(
+      '[Stripe] card number input still empty/invalid after fillCard — retrying once',
+    );
+    await page.waitForTimeout(1000);
+    await fillCard(page, card);
+    await page.waitForTimeout(800);
+  }
 
   const confirmPaymentPromise = page.waitForResponse(
     res =>
@@ -579,7 +878,10 @@ test.describe('Wealth Market Listing', () => {
       || bodyMentionsFailure(failBody)
       || await page.locator('text=/failed|declined|error|unsuccess|失败|错误/i').count() > 0;
 
-    console.log('[Attempt 1] fail signal:', failSignal, '| body:', JSON.stringify(failBody).slice(0, 300));
+    console.log(
+      '[Attempt 1] fail signal:', failSignal,
+      '| body:', (JSON.stringify(failBody) ?? 'null').slice(0, 300),
+    );
     await page.screenshot({ path: 'screenshots/17-wealth-market-pay-attempt1-fail.png', fullPage: true });
     await closeAnyBlockingDialog(page);
 
@@ -594,7 +896,10 @@ test.describe('Wealth Market Listing', () => {
       || bodyMentionsSuccess(successBody)
       || await page.locator('text=/success|succeed|paid|complete|成功|已支付|完成/i').count() > 0;
 
-    console.log('[Attempt 2] success signal:', successSignal, '| body:', JSON.stringify(successBody).slice(0, 300));
+    console.log(
+      '[Attempt 2] success signal:', successSignal,
+      '| body:', (JSON.stringify(successBody) ?? 'null').slice(0, 300),
+    );
     await page.screenshot({ path: 'screenshots/17-wealth-market-pay-attempt2-success.png', fullPage: true });
 
     // ── Step 8: Open Payment page and verify latest two history items ──────

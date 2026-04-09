@@ -3,8 +3,8 @@ import { login } from './helpers';
 
 test.setTimeout(120000);
 
-const EVENT_EMAIL = process.env.LIFETECH_EVENT_EMAIL || 'joy_zhu0921@163.com';
-const EVENT_PASSWORD = process.env.LIFETECH_EVENT_PASSWORD || '111111';
+const EVENT_EMAIL = process.env.LIFETECH_EVENT_EMAIL || '1144890814@qq.com';
+const EVENT_PASSWORD = process.env.LIFETECH_EVENT_PASSWORD || '66666666';
 const EVENT_DATE = process.env.LIFETECH_EVENT_DATE || '2026-04-30';
 
 const S = {
